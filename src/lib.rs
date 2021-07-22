@@ -1,11 +1,14 @@
-use juniper::{GraphQLType, GraphQLValue, ScalarValue, Registry, Arguments, Executor, ExecutionResult, EmptyMutation, RootNode, EmptySubscription, Variables, DefaultScalarValue, FieldError};
-use juniper::meta::{MetaType, Field};
-use serde_json::{Value, Map};
-use graphql_parser::schema::{Definition, TypeDefinition, Text};
 use std::collections::HashMap;
 use std::sync::Arc;
+
 use graphql_parser::query::Type;
-use juniper::graphql_value;
+use graphql_parser::schema::{Definition, Text, TypeDefinition};
+use juniper::{Arguments, ExecutionResult, Executor, FieldError, GraphQLType, GraphQLValue, Registry, ScalarValue};
+use juniper::meta::{Field, MetaType};
+use serde_json::{Map, Value};
+use std::error::Error;
+
+mod test;
 
 #[derive(Debug, Clone, PartialEq)]
 struct NodeSchema
@@ -30,7 +33,18 @@ pub enum TypeRef {
     NotNullType(Box<TypeRef>),
 }
 
-fn parse_graphql_schema(schema_txt: &str) -> Result<NodeSchema> {
+#[derive(Debug, Clone, PartialEq)]
+pub struct NodeTypeInfo {
+    schema: Arc<NodeSchema>,
+    node_type: NodeType,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Node {
+    fields: Map<String, Value>,
+}
+
+fn parse_graphql_schema(schema_txt: &str) -> Result<NodeSchema, Box<dyn Error>> {
     use graphql_parser::schema;
     use schema::parse_schema;
 
@@ -159,63 +173,9 @@ impl TypeRef {
     fn is_nullable(&self) -> (bool, &TypeRef) {
         match self {
             TypeRef::NotNullType(x) => (false, x.as_ref()),
-
             _ => (true, self)
         }
     }
-}
-
-
-impl Node {
-    fn build_field<'r, S>(info: &NodeTypeInfo, registry: &mut Registry<'r, S>, field_name: &String, field_type_ref: &TypeRef) -> Field<'r, S> where
-        S: ScalarValue,
-    {
-        let (nullable, type_ref) = field_type_ref.is_nullable();
-        match type_ref {
-            TypeRef::NamedType(idx) => {
-                match *idx {
-                    0 => {
-                        if nullable {
-                            registry.field::<Option<String>>(field_name, &())
-                        } else {
-                            registry.field::<String>(field_name, &())
-                        }
-                    }
-                    1 => {
-                        if nullable {
-                            registry.field::<Option<i32>>(field_name, &())
-                        } else {
-                            registry.field::<i32>(field_name, &())
-                        }
-                    }
-                    _ => {
-                        let field_node_type = info.schema.types.get(*idx).unwrap();
-                        let field_node_type_info = &NodeTypeInfo {
-                            schema: info.schema.clone(),
-                            node_type: field_node_type.clone(),
-                        };
-                        if nullable {
-                            registry.field::<Option<Node>>(field_name, field_node_type_info)
-                        } else {
-                            registry.field::<Arc<Node>>(field_name, field_node_type_info)
-                        }
-                    }
-                }
-            }
-            TypeRef::ListType(_) => panic!("implement me "),
-            TypeRef::NotNullType(_) => panic!("implement me "),
-        }
-    }
-}
-
-
-pub struct NodeTypeInfo {
-    schema: Arc<NodeSchema>,
-    node_type: NodeType,
-}
-
-pub struct Node {
-    fields: Map<String, Value>,
 }
 
 impl<S> GraphQLType<S> for Node
@@ -226,18 +186,59 @@ impl<S> GraphQLType<S> for Node
         Some(info.node_type.name.as_str())
     }
 
+
     fn meta<'r>(info: &Self::TypeInfo, registry: &mut Registry<'r, S>) -> MetaType<'r, S>
         where
             S: 'r,
     {
         let mut fields = Vec::new();
         info.node_type.fields.iter().for_each(|(field_name, field_type_ref)| {
-            let field = <Node>::build_field(info, registry, field_name, field_type_ref);
+            let field = build_field(info, registry, field_name, field_type_ref);
             fields.push(field);
         });
         registry
             .build_object_type::<Node>(info, &fields)
             .into_meta()
+    }
+}
+
+fn build_field<'r, S>(info: &NodeTypeInfo, registry: &mut Registry<'r, S>, field_name: &String, field_type_ref: &TypeRef) -> Field<'r, S> where
+    S: ScalarValue,
+{
+    let (nullable, type_ref) = field_type_ref.is_nullable();
+    match type_ref {
+        TypeRef::NamedType(idx) => {
+            match *idx {
+                0 => {
+                    if nullable {
+                        registry.field::<Option<String>>(field_name, &())
+                    } else {
+                        registry.field::<String>(field_name, &())
+                    }
+                }
+                1 => {
+                    if nullable {
+                        registry.field::<Option<i32>>(field_name, &())
+                    } else {
+                        registry.field::<i32>(field_name, &())
+                    }
+                }
+                _ => {
+                    let field_node_type = info.schema.types.get(*idx).unwrap();
+                    let field_node_type_info = &NodeTypeInfo {
+                        schema: info.schema.clone(),
+                        node_type: field_node_type.clone(),
+                    };
+                    if nullable {
+                        registry.field::<Option<Node>>(field_name, field_node_type_info)
+                    } else {
+                        registry.field::<Arc<Node>>(field_name, field_node_type_info)
+                    }
+                }
+            }
+        }
+        TypeRef::ListType(_) => panic!("implement me "),
+        TypeRef::NotNullType(_) => panic!("implement me "),
     }
 }
 
@@ -320,193 +321,4 @@ impl<S> GraphQLValue<S> for Node
     }
 }
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
-
-
-#[test]
-fn test_happy() {
-    let node_schema: Arc<NodeSchema> = Arc::new(parse_graphql_schema(r#"
-        schema {
-            query: Example
-        }
-        type Example {
-            foo: String,
-            bar: Int,
-            baz: Example,
-            foo_r: String!,
-            bar_r: Int!,
-            baz_r: Example!,
-        }
-    "#).unwrap());
-
-    let data = r#"
-        {
-            "foo": "1",
-            "bar": 2,
-            "baz": {
-                "foo": "3",
-                "bar": 4
-            },
-            "foo_r": "5",
-            "bar_r": 6,
-            "baz_r": {
-                "foo": "7"
-            }
-        }"#;
-
-    let schema: RootNode<_, _, _> = RootNode::new_with_info(
-        Node { fields: serde_json::from_str(data).unwrap() },
-        EmptyMutation::new(),
-        EmptySubscription::new(),
-        NodeTypeInfo {
-            schema: node_schema.clone(),
-            node_type: node_schema.query_type_ref.clone().unwrap(),
-        },
-        (),
-        (),
-    );
-
-
-    let actual: juniper::Value<DefaultScalarValue> = juniper::execute_sync(
-        r#"
-            {
-                foo
-                bar
-                baz {
-                  foo
-                  bar
-                }
-                foo_r
-                bar_r
-                baz_r {
-                  foo
-                }
-            }"#,
-        None,
-        &schema,
-        &Variables::new(),
-        &()).unwrap().0;
-
-    let expected: juniper::Value<DefaultScalarValue> = graphql_value!({
-        "foo": "1",
-        "bar": 2,
-        "baz": {
-            "foo": "3",
-            "bar": 4
-        },
-        "foo_r": "5",
-        "bar_r": 6,
-        "baz_r": {
-            "foo": "7",
-        }
-    });
-
-    assert_eq!(expected, actual);
-}
-
-#[test]
-fn test_no_data() {
-    let node_schema: Arc<NodeSchema> = Arc::new(parse_graphql_schema(r#"
-        schema {
-            query: Example
-        }
-        type Example {
-            foo: String,
-            bar: Int,
-            baz: Example,
-            foo_r: String!,
-            bar_r: Int!,
-            baz_r: Example!,
-        }
-    "#).unwrap());
-
-    let data = r#"{}"#;
-
-    let schema: RootNode<_, _, _> = RootNode::new_with_info(
-        Node { fields: serde_json::from_str(data).unwrap() },
-        EmptyMutation::new(),
-        EmptySubscription::new(),
-        NodeTypeInfo {
-            schema: node_schema.clone(),
-            node_type: node_schema.query_type_ref.clone().unwrap(),
-        },
-        (),
-        (),
-    );
-
-    let (actual, errs) = juniper::execute_sync(
-        r#"
-            {
-                #foo
-                #bar
-                #baz { foo, bar}
-                foo_r
-                bar_r
-                baz_r { foo, bar}
-            }"#,
-        None,
-        &schema,
-        &Variables::new(),
-        &()).expect("Execution failed");
-
-    assert_eq!(errs.len(), 1);
-    assert_eq!(actual, graphql_value!(None));
-}
-
-
-#[test]
-fn test_null_data() {
-    let node_schema: Arc<NodeSchema> = Arc::new(parse_graphql_schema(r#"
-        schema {
-            query: Example
-        }
-        type Example {
-            foo: String,
-            bar: Int,
-            baz: Example,
-            foo_r: String!,
-            bar_r: Int!,
-            baz_r: Example!,
-        }
-    "#).unwrap());
-    let data = r#"
-        {
-            "foo": null,
-            "bar": null,
-            "baz": null,
-            "foo_r": null,
-            "bar_r": null,
-            "baz_r": null
-        }"#;
-
-    let schema: RootNode<_, _, _> = RootNode::new_with_info(
-        Node { fields: serde_json::from_str(data).unwrap() },
-        EmptyMutation::new(),
-        EmptySubscription::new(),
-        NodeTypeInfo {
-            schema: node_schema.clone(),
-            node_type: node_schema.query_type_ref.clone().unwrap(),
-        },
-        (),
-        (),
-    );
-
-    let (actual, errs) = juniper::execute_sync(
-        r#"
-            {
-                #foo
-                #bar
-                #baz { foo, bar}
-                foo_r
-                bar_r
-                baz_r { foo, bar}
-            }"#,
-        None,
-        &schema,
-        &Variables::new(),
-        &()).expect("Execution failed");
-
-    assert_eq!(errs.len(), 1);
-    assert_eq!(actual, graphql_value!(None));
-}
 
