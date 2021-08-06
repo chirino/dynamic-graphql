@@ -1,192 +1,85 @@
-use std::sync::Arc;
+use juniper::{RootNode, EmptyMutation, EmptySubscription, Variables, execute_sync};
+use crate::{JsonObject, SchemaTypeInfo};
+use juniper::{graphql_value};
 
-use juniper::{DefaultScalarValue, EmptyMutation, EmptySubscription, RootNode, Variables, graphql_value};
-
-use crate::{Node, NodeSchema, NodeTypeInfo};
 
 #[test]
-fn test_happy() {
-    let node_schema: Arc<NodeSchema> = Arc::new(crate::parse_graphql_schema(r#"
-        schema {
-            query: Example
-        }
-        type Example {
-            foo: String,
-            bar: Int,
-            baz: Example,
-            foo_r: String!,
-            bar_r: Int!,
-            baz_r: Example!,
-        }
-    "#).unwrap());
+fn test_sdl_type_info() {
 
-    let data = r#"
+    let sdl = r#"
+        type Bar {
+            location: String
+            capacity: Int
+            open: Boolean!
+            rating: Float
+            foo: Foo
+        }
+        type Foo {
+            message: String
+            bar: Bar
+        }
+        "#;
+
+    let data = serde_json::from_str(r#"
         {
-            "foo": "1",
-            "bar": 2,
-            "baz": {
-                "foo": "3",
-                "bar": 4
-            },
-            "foo_r": "5",
-            "bar_r": 6,
-            "baz_r": {
-                "foo": "7"
+            "message": "hello world",
+            "bar": {
+                "location": "downtown",
+                "capacity": 80,
+                "open": true,
+                "rating": 4.5,
+                "foo": {
+                    "message": "drink more"
+                }
+            }
+        }"#).unwrap();
+
+    let info = SchemaTypeInfo { name: "Foo".to_string(), schema: sdl.to_string(),  };
+    let object = JsonObject { fields: data };
+
+    let schema: RootNode<_, _, _> = RootNode::new_with_info(
+        object,
+        EmptyMutation::new(),
+        EmptySubscription::new(),
+        info,
+        (),
+        (),
+    );
+
+    // print!("{}", schema.as_schema_language());
+
+    let query = r#"
+        {
+            message
+            bar {
+                location
+                capacity
+                open
+                rating
+                foo {
+                    message
+                }
             }
         }"#;
 
-    let schema: RootNode<_, _, _> = RootNode::new_with_info(
-        Node { fields: serde_json::from_str(data).unwrap() },
-        EmptyMutation::new(),
-        EmptySubscription::new(),
-        NodeTypeInfo {
-            schema: node_schema.clone(),
-            node_type: node_schema.query_type_ref.clone().unwrap(),
-        },
-        (),
-        (),
-    );
-
-
-    let actual: juniper::Value<DefaultScalarValue> = juniper::execute_sync(
-        r#"
-            {
-                foo
-                bar
-                baz {
-                  foo
-                  bar
+    assert_eq!(
+        execute_sync(query, None, &schema, &Variables::new(), &()),
+        Ok((
+            graphql_value!({
+                "message": "hello world",
+                "bar": {
+                    "location": "downtown",
+                    "capacity": 80,
+                    "open": true,
+                    "rating": 4.5,
+                    "foo": {
+                        "message": "drink more"
+                    }
                 }
-                foo_r
-                bar_r
-                baz_r {
-                  foo
-                }
-            }"#,
-        None,
-        &schema,
-        &Variables::new(),
-        &()).unwrap().0;
-
-    let expected: juniper::Value<DefaultScalarValue> = graphql_value!({
-        "foo": "1",
-        "bar": 2,
-        "baz": {
-            "foo": "3",
-            "bar": 4
-        },
-        "foo_r": "5",
-        "bar_r": 6,
-        "baz_r": {
-            "foo": "7",
-        }
-    });
-
-    assert_eq!(expected, actual);
-}
-
-#[test]
-fn test_no_data() {
-    let node_schema: Arc<NodeSchema> = Arc::new(crate::parse_graphql_schema(r#"
-        schema {
-            query: Example
-        }
-        type Example {
-            foo: String,
-            bar: Int,
-            baz: Example,
-            foo_r: String!,
-            bar_r: Int!,
-            baz_r: Example!,
-        }
-    "#).unwrap());
-
-    let data = r#"{}"#;
-
-    let schema: RootNode<_, _, _> = RootNode::new_with_info(
-        Node { fields: serde_json::from_str(data).unwrap() },
-        EmptyMutation::new(),
-        EmptySubscription::new(),
-        NodeTypeInfo {
-            schema: node_schema.clone(),
-            node_type: node_schema.query_type_ref.clone().unwrap(),
-        },
-        (),
-        (),
+            })
+            ,
+            vec![]
+        ))
     );
-
-    let (actual, errs) = juniper::execute_sync(
-        r#"
-            {
-                #foo
-                #bar
-                #baz { foo, bar}
-                foo_r
-                bar_r
-                baz_r { foo, bar}
-            }"#,
-        None,
-        &schema,
-        &Variables::new(),
-        &()).expect("Execution failed");
-
-    assert_eq!(errs.len(), 1);
-    assert_eq!(actual, graphql_value!(None));
 }
 
-
-#[test]
-fn test_null_data() {
-    let node_schema: Arc<NodeSchema> = Arc::new(crate::parse_graphql_schema(r#"
-        schema {
-            query: Example
-        }
-        type Example {
-            foo: String,
-            bar: Int,
-            baz: Example,
-            foo_r: String!,
-            bar_r: Int!,
-            baz_r: Example!,
-        }
-    "#).unwrap());
-    let data = r#"
-        {
-            "foo": null,
-            "bar": null,
-            "baz": null,
-            "foo_r": null,
-            "bar_r": null,
-            "baz_r": null
-        }"#;
-
-    let schema: RootNode<_, _, _> = RootNode::new_with_info(
-        Node { fields: serde_json::from_str(data).unwrap() },
-        EmptyMutation::new(),
-        EmptySubscription::new(),
-        NodeTypeInfo {
-            schema: node_schema.clone(),
-            node_type: node_schema.query_type_ref.clone().unwrap(),
-        },
-        (),
-        (),
-    );
-
-    let (actual, errs) = juniper::execute_sync(
-        r#"
-            {
-                #foo
-                #bar
-                #baz { foo, bar}
-                foo_r
-                bar_r
-                baz_r { foo, bar}
-            }"#,
-        None,
-        &schema,
-        &Variables::new(),
-        &()).expect("Execution failed");
-
-    assert_eq!(errs.len(), 1);
-    assert_eq!(actual, graphql_value!(None));
-}
