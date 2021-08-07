@@ -83,3 +83,60 @@ fn test_sdl_type_info() {
     );
 }
 
+
+#[test]
+fn test_required_field() {
+
+    let sdl = r#"
+        type Bar {
+            location: String
+            open: Boolean!
+        }
+        type Foo {
+            message: String
+            bar: Bar
+        }
+        "#;
+
+    let data = serde_json::from_str(r#"
+        {
+            "message": "hello world",
+            "bar": {
+                "capacity": 80
+            }
+        }"#).unwrap();
+
+    let info = SchemaTypeInfo { name: "Foo".to_string(), schema: sdl.to_string(),  };
+    let object = JsonObject { fields: data };
+
+    let schema: RootNode<_, _, _> = RootNode::new_with_info(
+        object,
+        EmptyMutation::new(),
+        EmptySubscription::new(),
+        info,
+        (),
+        (),
+    );
+
+    let query = r#"
+        {
+            message
+            bar {
+                location
+                open
+            }
+        }"#;
+
+    assert_eq!(
+        execute_sync(query, None, &schema, &Variables::new(), &()),
+        Ok((
+            graphql_value!({
+                "message": "hello world",
+                "bar": None,
+            })
+            ,
+            vec![]
+        ))
+    );
+}
+

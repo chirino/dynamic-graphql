@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod test;
+mod sort_schema;
 
 use graphql_parser::query::Type;
 use graphql_parser::schema::{Definition, Text, TypeDefinition};
@@ -115,7 +116,6 @@ fn build_field<'r, 't, S, T>(info: &SchemaTypeInfo, registry: &mut Registry<'r, 
     }
 }
 
-
 impl<S> GraphQLValue<S> for JsonObject
     where
         S: ScalarValue,
@@ -165,11 +165,11 @@ impl<S> GraphQLValue<S> for JsonObject
                         todo!()
                     }
                     JsonValue::Object(field_value) => {
-
                         let meta_type = executor.schema()
                             .concrete_type_by_name(<Self as GraphQLType<S>>::name(info).unwrap())
                             .expect("Type not found in schema");
-                        let filed_type_name = &meta_type.field_by_name(field_name).unwrap().field_type.innermost_name();
+                        let field_type = &meta_type.field_by_name(field_name).unwrap().field_type.innermost_name();
+                        let filed_type_name = field_type;
 
                         executor.resolve::<JsonObject>(&SchemaTypeInfo {
                             schema: "".to_string(),
