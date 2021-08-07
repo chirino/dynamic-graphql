@@ -1,6 +1,4 @@
 use graphql_parser::schema::{*};
-use std::cmp::Ordering;
-use std::fmt::Display;
 
 pub fn document<'a, T>(value: &mut Document<'a, T>)
     where T: Text<'a>

@@ -1,6 +1,6 @@
-use juniper::{RootNode, EmptyMutation, EmptySubscription, Variables, execute_sync};
-use crate::{JsonObject, SchemaTypeInfo};
-use juniper::{graphql_value};
+use juniper::{EmptyMutation, EmptySubscription, execute_sync, RootNode, Variables};
+use juniper::graphql_value;
+use crate::juniper::json::{Object, SchemaInfo};
 
 
 #[test]
@@ -34,8 +34,8 @@ fn test_sdl_type_info() {
             }
         }"#).unwrap();
 
-    let info = SchemaTypeInfo { name: "Foo".to_string(), schema: sdl.to_string(),  };
-    let object = JsonObject { fields: data };
+    let info = SchemaInfo { name: "Foo".to_string(), schema: sdl.to_string(),  };
+    let object = Object { fields: data };
 
     let schema: RootNode<_, _, _> = RootNode::new_with_info(
         object,
@@ -106,8 +106,8 @@ fn test_required_field() {
             }
         }"#).unwrap();
 
-    let info = SchemaTypeInfo { name: "Foo".to_string(), schema: sdl.to_string(),  };
-    let object = JsonObject { fields: data };
+    let info = SchemaInfo { name: "Foo".to_string(), schema: sdl.to_string(),  };
+    let object = Object { fields: data };
 
     let schema: RootNode<_, _, _> = RootNode::new_with_info(
         object,
@@ -139,4 +139,5 @@ fn test_required_field() {
         ))
     );
 }
+
 
